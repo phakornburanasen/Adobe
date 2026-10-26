@@ -1,7 +1,10 @@
+import mimetypes
 import os
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -20,6 +23,178 @@ def get_db_connection():
 app = Flask(__name__)
 # ปรับ origins ตามที่คุณรัน frontend
 CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+REPORT_UPLOAD_ROOT = Path(__file__).resolve().parent / "uploads" / "report_files"
+REPORT_CONFIG = {
+    "price-renew-history": {
+        "table": "price_renew_adobe", "folder": "price_renew_history", "prefix": "price_renew_history",
+        "title": "Price & Renew History", "price_type": True,
+        "columns": ["id", "price", "type", "detail", "year", "file_type", "note", "created_at"],
+        "search": ["detail", "note", "type", "price::text", "year::text"],
+    },
+    "renewal-summary": {
+        "table": "renewal_summary_adobe", "folder": "renewal_summary", "prefix": "renewal_summary",
+        "title": "Renewal Summary", "price_type": False,
+        "columns": ["id", "detail", "year", "file_type", "note", "created_at"],
+        "search": ["detail", "note", "year::text"],
+    },
+}
+
+ALLOWED_REPORT_EXTENSIONS = {".pdf": "pdf", ".xls": "excel", ".xlsx": "excel"}
+
+def report_config(key):
+    return REPORT_CONFIG.get((key or "").strip().lower())
+
+def optional_text(value):
+    value = "" if value is None else str(value).strip()
+    return value or None
+
+def optional_int(value, name="year"):
+    if value in (None, ""): return None
+    try: return int(str(value).strip())
+    except (TypeError, ValueError): raise ValueError(f"{name} ต้องเป็นตัวเลข")
+
+def optional_price(value):
+    if value in (None, ""): return None
+    try: return Decimal(str(value).strip())
+    except (InvalidOperation, TypeError, ValueError): raise ValueError("price ไม่ถูกต้อง")
+
+def upload_info(file_storage, declared=None):
+    if not file_storage or not file_storage.filename: raise ValueError("กรุณาเลือกไฟล์")
+    suffix = Path(file_storage.filename).suffix.lower()
+    kind = ALLOWED_REPORT_EXTENSIONS.get(suffix)
+    if not kind: raise ValueError("รองรับเฉพาะไฟล์ PDF, XLS และ XLSX")
+    declared = optional_text(declared)
+    if declared and declared not in {"pdf", "excel"}: raise ValueError("file_type ต้องเป็น pdf หรือ excel")
+    if declared and declared != kind: raise ValueError("ประเภทไฟล์ไม่ตรงกับไฟล์ที่อัปโหลด")
+    return kind, suffix
+
+def report_file_path(key, item_id):
+    config = report_config(key)
+    if not config: return None
+    folder = REPORT_UPLOAD_ROOT / config["folder"]
+    matches = sorted(folder.glob(f"{int(item_id)}.*")) if folder.exists() else []
+    return matches[0] if matches else None
+
+def remove_report_file(key, item_id):
+    path = report_file_path(key, item_id)
+    if path and path.exists(): path.unlink()
+
+def save_report_file(key, item_id, storage, suffix):
+    folder = REPORT_UPLOAD_ROOT / report_config(key)["folder"]
+    folder.mkdir(parents=True, exist_ok=True)
+    remove_report_file(key, item_id)
+    path = folder / f"{item_id}{suffix.lower()}"
+    storage.save(path)
+    return path
+
+def serialize_report(key, row):
+    item = dict(row or {})
+    if item.get("created_at") is not None and hasattr(item["created_at"], "isoformat"): item["created_at"] = item["created_at"].isoformat()
+    if report_config(key)["price_type"] and item.get("price") is not None: item["price"] = float(item["price"])
+    path = report_file_path(key, item.get("id"))
+    item["has_file"] = bool(path and path.exists())
+    item["file_name"] = f"{report_config(key)['prefix']}_{item['id']}{path.suffix.lower()}" if path else None
+    item["download_url"] = f"/api/report-files/{key}/{item['id']}/download" if path else None
+    return item
+
+def fetch_report(conn, key, item_id):
+    config = report_config(key)
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(f"SELECT {', '.join(config['columns'])} FROM {config['table']} WHERE id = %s", (item_id,))
+        return cur.fetchone()
+
+@app.route("/api/report-files/<report_key>", methods=["GET"])
+def list_report_files(report_key):
+    config = report_config(report_key)
+    if not config: return jsonify({"error": "ไม่พบเมนูรายงานที่ต้องการ"}), 404
+    search = request.args.get("search", "", type=str).strip()
+    page = max(1, request.args.get("page", 1, type=int)); page_size = max(1, min(request.args.get("pageSize", 10, type=int), 200))
+    where, params = [], []
+    if search:
+        where.append("(" + " OR ".join(f"{col} ILIKE %s" for col in config["search"]) + ")"); params.extend([f"%{search}%"] * len(config["search"]))
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+    try:
+        conn = get_db_connection()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(f"SELECT {', '.join(config['columns'])} FROM {config['table']}{where_sql} ORDER BY year DESC NULLS LAST, created_at DESC, id DESC LIMIT %s OFFSET %s", [*params, page_size, (page - 1) * page_size]); rows = cur.fetchall()
+            cur.execute(f"SELECT COUNT(*) AS count FROM {config['table']}{where_sql}", params); total = cur.fetchone()["count"]
+        conn.close()
+        return jsonify({"items": [serialize_report(report_key, row) for row in rows], "total": int(total), "page": page, "pageSize": page_size, "title": config["title"]})
+    except Exception as exc: return jsonify({"error": "ไม่สามารถดึงข้อมูลรายงานได้", "detail": str(exc)}), 500
+
+@app.route("/api/report-files/<report_key>", methods=["POST"])
+def create_report_file(report_key):
+    config = report_config(report_key)
+    if not config: return jsonify({"error": "ไม่พบเมนูรายงานที่ต้องการ"}), 404
+    data = request.form; storage = request.files.get("file")
+    try:
+        kind, suffix = upload_info(storage, data.get("file_type")); detail = optional_text(data.get("detail")); year = optional_int(data.get("year")); note = optional_text(data.get("note"))
+        values = []
+        columns = []
+        if config["price_type"]:
+            item_type = optional_text(data.get("type"))
+            if item_type not in {"new", "renew"}: raise ValueError("type ต้องเป็น new หรือ renew")
+            columns += ["price", "type"]; values += [optional_price(data.get("price")), item_type]
+        columns += ["detail", "year", "file_type", "note"]; values += [detail, year, kind, note]
+        conn = get_db_connection()
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(f"INSERT INTO {config['table']} ({', '.join(columns)}) VALUES ({', '.join(['%s'] * len(values))}) RETURNING {', '.join(config['columns'])}", values); row = cur.fetchone(); save_report_file(report_key, row["id"], storage, suffix)
+        conn.commit(); conn.close(); return jsonify({"item": serialize_report(report_key, row)}), 201
+    except ValueError as exc: return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        if "conn" in locals(): conn.rollback(); conn.close()
+        return jsonify({"error": "ไม่สามารถบันทึกข้อมูลรายงานได้", "detail": str(exc)}), 500
+
+@app.route("/api/report-files/<report_key>/<int:item_id>", methods=["PUT"])
+def update_report_file(report_key, item_id):
+    config = report_config(report_key)
+    if not config: return jsonify({"error": "ไม่พบเมนูรายงานที่ต้องการ"}), 404
+    data = request.form; storage = request.files.get("file"); updates = []; values = []
+    try:
+        if config["price_type"] and "price" in data: updates.append("price = %s"); values.append(optional_price(data.get("price")))
+        if config["price_type"] and "type" in data:
+            if data.get("type") not in {"new", "renew"}: raise ValueError("type ต้องเป็น new หรือ renew")
+            updates.append("type = %s"); values.append(data.get("type"))
+        for name in ["detail", "year", "note"]:
+            if name in data: updates.append(f"{name} = %s"); values.append(optional_int(data.get(name), name) if name == "year" else optional_text(data.get(name)))
+        suffix = None
+        if storage and storage.filename:
+            kind, suffix = upload_info(storage, data.get("file_type")); updates.append("file_type = %s"); values.append(kind)
+        elif "file_type" in data:
+            if data.get("file_type") not in {"pdf", "excel"}: raise ValueError("file_type ต้องเป็น pdf หรือ excel")
+            updates.append("file_type = %s"); values.append(data.get("file_type"))
+        if not updates: raise ValueError("ไม่มีข้อมูลสำหรับอัปเดต")
+        conn = get_db_connection(); existing = fetch_report(conn, report_key, item_id)
+        if not existing: conn.close(); return jsonify({"error": "ไม่พบข้อมูลที่ต้องการอัปเดต"}), 404
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(f"UPDATE {config['table']} SET {', '.join(updates)} WHERE id = %s RETURNING {', '.join(config['columns'])}", [*values, item_id]); row = cur.fetchone();
+            if storage and suffix: save_report_file(report_key, item_id, storage, suffix)
+        conn.commit(); conn.close(); return jsonify({"item": serialize_report(report_key, row)})
+    except ValueError as exc: return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        if "conn" in locals(): conn.rollback(); conn.close()
+        return jsonify({"error": "ไม่สามารถอัปเดตข้อมูลรายงานได้", "detail": str(exc)}), 500
+
+@app.route("/api/report-files/<report_key>/<int:item_id>", methods=["DELETE"])
+def delete_report_file(report_key, item_id):
+    config = report_config(report_key)
+    if not config: return jsonify({"error": "ไม่พบเมนูรายงานที่ต้องการ"}), 404
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur: cur.execute(f"DELETE FROM {config['table']} WHERE id = %s", (item_id,)); deleted = cur.rowcount
+        conn.commit(); conn.close()
+        if not deleted: return jsonify({"error": "ไม่พบข้อมูลที่ต้องการลบ"}), 404
+        remove_report_file(report_key, item_id); return jsonify({"success": True})
+    except Exception as exc:
+        if "conn" in locals(): conn.rollback(); conn.close()
+        return jsonify({"error": "ไม่สามารถลบข้อมูลรายงานได้", "detail": str(exc)}), 500
+
+@app.route("/api/report-files/<report_key>/<int:item_id>/download", methods=["GET"])
+def download_report_file(report_key, item_id):
+    config = report_config(report_key); path = report_file_path(report_key, item_id)
+    if not config or not path or not path.exists(): return jsonify({"error": "ไม่พบไฟล์ที่ต้องการดาวน์โหลด"}), 404
+    return send_file(path, as_attachment=True, download_name=f"{config['prefix']}_{item_id}{path.suffix.lower()}", mimetype=mimetypes.guess_type(str(path))[0] or "application/octet-stream")
 
 def get_client_ip(req: request) -> str:
     """Return best-effort client IP, considering proxy headers."""

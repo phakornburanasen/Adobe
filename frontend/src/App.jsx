@@ -5,6 +5,7 @@ import Homepage from './components/Homepage.jsx'
 import Dashboard from './components/Dashboard.jsx'
 import Settings from './components/Settings.jsx'
 import Reports from './components/Reports.jsx'
+import ReportFileManager from './components/ReportFileManager.jsx'
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
@@ -85,6 +86,8 @@ function App() {
       [`${BASE}/Dashboard`, '#Dashboard'],
       [`${BASE}/Licenses`,  '#Licenses'],
       [`${BASE}/Reports`,   '#Reports'],
+      [`${BASE}/PriceRenewHistory`, '#PriceRenewHistory'],
+      [`${BASE}/RenewalSummary`, '#RenewalSummary'],
       [`${BASE}/Settings`,  '#Settings'],
     ])
     if (legacyToHash.has(p)) {
@@ -97,7 +100,7 @@ function App() {
     }
     // If logged in: prefer hash-based routing
     const h = window.location.hash || hash
-    const allowedHashes = new Set(['#Dashboard', '#Licenses', '#Reports', '#Settings'])
+    const allowedHashes = new Set(['#Dashboard', '#Licenses', '#Reports', '#PriceRenewHistory', '#RenewalSummary', '#Settings'])
     if (allowedHashes.has(h)) {
       // Stay where we are; rendering below will choose by hash
       return
@@ -185,6 +188,12 @@ function App() {
     }
     if (currentHash === '#Reports') {
       return <Reports navigate={navigate} user={user} onLogout={handleLogout} />
+    }
+    if (currentHash === '#PriceRenewHistory') {
+      return <ReportFileManager navigate={navigate} user={user} onLogout={handleLogout} reportKey="price-renew-history" activeMenu="priceRenewHistory" title="Price & Renew History" subtitle="จัดการประวัติราคาและไฟล์ต่ออายุ" hashKey="#PriceRenewHistory" includePriceType />
+    }
+    if (currentHash === '#RenewalSummary') {
+      return <ReportFileManager navigate={navigate} user={user} onLogout={handleLogout} reportKey="renewal-summary" activeMenu="renewalSummary" title="Renewal Summary" subtitle="จัดการไฟล์สรุปการต่ออายุ" hashKey="#RenewalSummary" />
     }
   }
 
