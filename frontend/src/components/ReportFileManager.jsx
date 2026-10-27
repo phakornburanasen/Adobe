@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import SideBar from './SideBar.jsx'
 import { API_BASE } from '../config.js'
 import { navigateByMenuKey } from './navigation.js'
+import adobeLogo from '../assets/adobe-logo.png'
 import './Homepage.css'
 
 function inferFileType(fileName = '') {
@@ -190,7 +191,7 @@ export default function ReportFileManager({
     }, 2500)
   }
 
-  useEffect(() => { document.title = `Microsoft 365 Licenses - ${title}` }, [title])
+  useEffect(() => { document.title = `Adobe Licenses - ${title}` }, [title])
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 60000)
     return () => clearInterval(timer)
@@ -385,15 +386,16 @@ export default function ReportFileManager({
                 </svg>
               </span>
             </button>
-            <div className="logo" aria-label="Microsoft">
-              <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                <rect x="2" y="2" width="9" height="9" fill="#F25022" rx="1" />
-                <rect x="13" y="2" width="9" height="9" fill="#7FBA00" rx="1" />
-                <rect x="2" y="13" width="9" height="9" fill="#00A4EF" rx="1" />
-                <rect x="13" y="13" width="9" height="9" fill="#FFB900" rx="1" />
-              </svg>
+            <div className="logo" aria-label="Adobe">
+              <img
+                src={adobeLogo}
+                alt="Adobe Logo"
+                width="60"
+                height="60"
+                style={{ display: 'block' }}
+              />
             </div>
-            <h1>Microsoft 365 Licenses</h1>
+            <h1>Adobe Creative Cloud</h1>
           </div>
 
           <div className="user-section">
