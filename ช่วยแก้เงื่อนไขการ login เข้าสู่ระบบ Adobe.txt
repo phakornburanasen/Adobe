@@ -1,0 +1,42 @@
+ช่วยแก้เงื่อนไขการ login เข้าสู่ระบบให้ทีจากเดิมที่ต้องเช็คสิทธิ์การเข้าใช้งานที่ฐานข้อมูล Postgres
+
+ข้อมูลฐานข้อมูลใหม่ใช้แค่ในการเช็คสิทธิ์เข้าระบบ
+ip : 10.0.32.165
+user : iot
+pass : shop#floor
+SQLSERVER2016
+
+ขอปรับเปลี่ยนเป็น
+เมื่อ login ด้วย user AD ถูกต้องสำเร็จ
+
+ฐานข้อมูล MNG_login
+โดยตรวจเงื่อนไขหลักดังนี้:
+
+```sql
+SELECT Active
+FROM dbo.SystemUserPermissions
+WHERE Username = @Username
+  AND SystemCode = 'ADOBE-Management'
+  AND Active = 1;
+```
+
+อย่างที่ 2 คือสามารถ login ผ่าน link ได้โดยจะมีการส่งค่าแบบนี้ สำหรับเช็คสิทธิ์การเข้าใช้งานระบบ
+http://10.0.32.71/ADOBE/login?action=dXNlcm5hbWUgOlQ5MDU4LFN5c3RlbUNvZGUgOkFET0JFLU1hbmFnZW1lbnQsYWN0aXZlIDox
+
+แต่จะเป็นการข้ามการใส่ password ช่วยปรับให้ที
+โดยการ login ด้วย password frontend จะส่งค่าต่อไปนี้ไปทำการเช็คเข้าสู่ระบบ
+ตัวอย่างข้อมูล:
+
+```json
+{
+  "username": "T9058",
+  "SystemCode": "ADOBE-Management",
+  "password": "รหัสผ่าน AD"
+}
+```
+ปรับแก้ไข login เดิมปรับมาเป็น ภาษา Go ในการเช็คสิทธิ์เข้าระบบ ปรับแก้แค่ส่วน login ส่วนอื่นๆยังเหมือนเดิม
+สร้างไฟล์ Go ใหม่ใน folder backend_login
+port :5205
+ส่วน Displayname ที่ navbar ให้ดึงข้อมูลมาจาก api http://10.0.32.71:23007/api/userinfo/T9058
+ตัวอย่าง username : T9058
+เอาค่า displayName ไปแสดงเเทน

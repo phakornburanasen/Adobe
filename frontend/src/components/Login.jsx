@@ -2,13 +2,15 @@ import { useState } from 'react'
 import adobeLogo from '../assets/adobe-logo.png';
 import './Login.css'
 
-export default function Login({ onSubmit }) {
+export default function Login({ onSubmit, externalError = '', externalLoading = false }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [remember, setRemember] = useState(true)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const isBusy = loading || externalLoading
+  const displayError = error || externalError
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -22,11 +24,9 @@ export default function Login({ onSubmit }) {
 
     setLoading(true)
     try {
-      // Hook for parent or future API call
       if (onSubmit) {
         await onSubmit({ username, password, remember })
       } else {
-        // Simulate login delay
         await new Promise((r) => setTimeout(r, 800))
         alert('ล็อกอินสำเร็จ (ตัวอย่าง)')
       }
@@ -39,7 +39,7 @@ export default function Login({ onSubmit }) {
 
   return (
     <div className="login-page">
-      <div className="login-card" data-loading={loading}>
+      <div className="login-card" data-loading={isBusy}>
         <div className="brand">
           <div className="logo" aria-label="Adobe">
             <img 
@@ -51,10 +51,12 @@ export default function Login({ onSubmit }) {
             />
           </div>
           <h1>Adobe Licenses</h1>
-          <p className="subtitle">ยินดีต้อนรับ! กรุณาเข้าสู่ระบบเพื่อดำเนินการต่อ</p>
+          <p className="subtitle">
+            {externalLoading ? 'กำลังตรวจสอบสิทธิ์การเข้าใช้งาน...' : 'ยินดีต้อนรับ! กรุณาเข้าสู่ระบบเพื่อดำเนินการต่อ'}
+          </p>
         </div>
 
-        {error && <div className="alert">{error}</div>}
+        {displayError && <div className="alert">{displayError}</div>}
 
         <form onSubmit={handleSubmit} className="form">
           <div className="field">
@@ -73,6 +75,7 @@ export default function Login({ onSubmit }) {
                 value={username}
                 onChange={(e) => setUsername(e.target.value.toUpperCase())}
                 autoComplete="off"
+                disabled={isBusy}
                 required
               />
             </div>
@@ -94,6 +97,7 @@ export default function Login({ onSubmit }) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
+                disabled={isBusy}
                 required
               />
               <button
@@ -101,6 +105,7 @@ export default function Login({ onSubmit }) {
                 className="suffix-btn"
                 onClick={() => setShowPassword((s) => !s)}
                 aria-label={showPassword ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'}
+                disabled={isBusy}
               >
                 {showPassword ? (
                   // Eye closed icon
@@ -120,8 +125,8 @@ export default function Login({ onSubmit }) {
               </button>
             </div>
           </div>
-          <button className="submit" type="submit" disabled={loading} aria-busy={loading}>
-            {loading ? (
+          <button className="submit" type="submit" disabled={isBusy} aria-busy={isBusy}>
+            {isBusy ? (
               <>
                 <span className="btn-icon" aria-hidden>
                   <svg className="spinner" width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
