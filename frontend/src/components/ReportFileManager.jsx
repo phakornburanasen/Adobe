@@ -311,7 +311,10 @@ export default function ReportFileManager({
       showToast('กรุณาเลือกไฟล์ก่อนบันทึก', 'error')
       return
     }
-    if (!form.file_type) {
+    // Existing records may not have a file type (or may keep their current
+    // attachment).  Editing the metadata must not require selecting a file
+    // again or inventing a file type for an unchanged attachment.
+    if (!editingItem && !form.file_type) {
       showToast('กรุณาระบุประเภทไฟล์', 'error')
       return
     }
@@ -325,7 +328,7 @@ export default function ReportFileManager({
       }
       payload.append('detail', form.detail ?? '')
       payload.append('year', form.year ?? '')
-      payload.append('file_type', form.file_type ?? '')
+      if (form.file_type) payload.append('file_type', form.file_type)
       payload.append('note', form.note ?? '')
       if (form.file) payload.append('file', form.file)
 

@@ -161,7 +161,7 @@ def update_report_file(report_key, item_id):
         suffix = None
         if storage and storage.filename:
             kind, suffix = upload_info(storage, data.get("file_type")); updates.append("file_type = %s"); values.append(kind)
-        elif "file_type" in data:
+        elif "file_type" in data and optional_text(data.get("file_type")):
             if data.get("file_type") not in {"pdf", "excel"}: raise ValueError("file_type ต้องเป็น pdf หรือ excel")
             updates.append("file_type = %s"); values.append(data.get("file_type"))
         if not updates: raise ValueError("ไม่มีข้อมูลสำหรับอัปเดต")
